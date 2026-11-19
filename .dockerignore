@@ -1,0 +1,8 @@
+**/bin/
+**/obj/
+.git/
+.github/
+.vs/
+tests/
+*.md
+docker-compose.yml
