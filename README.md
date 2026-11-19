@@ -57,9 +57,7 @@ Runs on every pull request to `main`: restore, test, build in Release, then buil
 
 
 
-\## CI
-
-
+## CI
 
 Every pull request to `main` is built and tested automatically with GitHub Actions.
 
