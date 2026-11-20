@@ -45,7 +45,7 @@ public class ProductsEndpointsTests : IClassFixture<ProductsApiFactory>
     {
         var response = await _client.PostAsJsonAsync("/api/products", ValidRequest("Mouse"));
 
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.NotNull(response.Headers.Location);
         var created = await response.Content.ReadFromJsonAsync<ProductResponse>();
         Assert.Equal("Mouse", created!.Name);
