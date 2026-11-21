@@ -2,14 +2,20 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using ProductsApi.Caching;
 using ProductsApi.Data;
 
 namespace ProductsApi.Tests;
 
 // Starts the real API in memory, but swaps PostgreSQL for an in-memory database
+// and Redis for an in-memory cache, so tests need no external services.
 public class ProductsApiFactory : WebApplicationFactory<Program>
 {
     private readonly string _databaseName = Guid.NewGuid().ToString();
+
+    // Exposed so tests can look inside the cache
+    public InMemoryCacheStore Cache { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -31,6 +37,10 @@ public class ProductsApiFactory : WebApplicationFactory<Program>
 
             services.AddDbContext<AppDbContext>(options =>
                 options.UseInMemoryDatabase(_databaseName));
+
+            // Replace Redis with the in-memory cache
+            services.RemoveAll<ICacheStore>();
+            services.AddSingleton<ICacheStore>(Cache);
         });
     }
 }
