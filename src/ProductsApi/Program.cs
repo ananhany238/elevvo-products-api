@@ -2,7 +2,9 @@ using Microsoft.EntityFrameworkCore;
 using ProductsApi.Caching;
 using ProductsApi.Data;
 using ProductsApi.Middleware;
+using ProductsApi.Outbox;
 using ProductsApi.Services;
+using ProductsApi.Webhooks;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -24,6 +26,7 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
     return ConnectionMultiplexer.Connect(options);
 });
 builder.Services.AddSingleton<ICacheStore, RedisCacheStore>();
+builder.Services.AddSingleton<ProductCacheInvalidator>();
 
 builder.Services.Configure<RateLimitOptions>(builder.Configuration.GetSection("RateLimit"));
 
@@ -34,9 +37,20 @@ builder.Services.AddScoped<IProductService>(sp => new CachedProductService(
     sp.GetRequiredService<ICacheStore>(),
     sp.GetRequiredService<ILogger<CachedProductService>>()));
 
+// Webhooks (Task 3): signature verification, idempotent processing and the transactional outbox
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.Configure<WebhookOptions>(builder.Configuration.GetSection("Webhook"));
+builder.Services.Configure<OutboxOptions>(builder.Configuration.GetSection("Outbox"));
+builder.Services.AddSingleton<WebhookSignatureVerifier>();
+builder.Services.AddScoped<WebhookEventProcessor>();
+builder.Services.AddSingleton<IExternalNotifier, LoggingExternalNotifier>();
+builder.Services.AddScoped<OutboxProcessor>();
+builder.Services.AddHostedService<OutboxWorker>();
+
 var app = builder.Build();
 
-// Creates the tables on first start (simple approach for this task; migrations can replace it later)
+// Creates the tables on first start. Note: EnsureCreated does nothing if the database already
+// has tables, so after adding new tables to the model, reset the dev database (docker compose down -v).
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();

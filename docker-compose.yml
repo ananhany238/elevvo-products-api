@@ -6,6 +6,8 @@ services:
     environment:
       ConnectionStrings__Default: "Host=postgres;Port=5432;Database=productsdb;Username=postgres;Password=postgres"
       Redis__ConnectionString: "redis:6379"
+      # Set WEBHOOK_SECRET in a local .env file (never commit it). Empty = webhooks answer 503.
+      Webhook__Secret: "${WEBHOOK_SECRET:-}"
     depends_on:
       postgres:
         condition: service_healthy
