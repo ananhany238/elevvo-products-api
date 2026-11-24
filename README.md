@@ -202,12 +202,6 @@ docker-compose.yml        API + PostgreSQL + Redis with health checks
 - **`EnsureCreated` at startup instead of migrations.** Simple for this project, but it does nothing on a database that already has tables, so after changing the model the dev database must be reset. Real deployments should use EF Core migrations.
 - **Passwords in `docker-compose.yml` are for local development only.**
 
-## Screenshots
-
-![All tests passing](docs/images/tests-passing.png)
-![Compose services healthy](docs/images/compose-healthy.png)
-![Green CI check](docs/images/ci-green.png)
-![Merge blocked by a failing check](docs/images/merge-blocked.png)
 
 ## Author
 
