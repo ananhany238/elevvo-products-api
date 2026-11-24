@@ -12,10 +12,8 @@ public class CachedProductService : IProductService
 {
     public static readonly TimeSpan CacheTtl = TimeSpan.FromHours(1);
 
-    // Lists are cached under a key that contains a "version" number. Bumping the version
-    // makes every old list key unreachable at once (they expire by themselves after 1 hour).
-    private const string ListVersionKey = "products:list:version";
-
+    // Lists are cached under a key that contains a "version" number (see ProductCacheKeys).
+    // Bumping the version makes every old list key unreachable at once (they expire after 1 hour).
     private readonly IProductService _inner;
     private readonly ICacheStore _cache;
     private readonly ILogger<CachedProductService> _logger;
@@ -27,15 +25,13 @@ public class CachedProductService : IProductService
         _logger = logger;
     }
 
-    private static string ItemKey(int id) => $"products:item:{id}";
-
     public async Task<IReadOnlyList<ProductResponse>> GetAllAsync(int page, int pageSize)
     {
         string? key = null;
 
         try
         {
-            var version = await _cache.GetAsync(ListVersionKey) ?? "0";
+            var version = await _cache.GetAsync(ProductCacheKeys.ListVersionKey) ?? "0";
             key = $"products:list:v{version}:page{page}:size{pageSize}";
 
             var cached = await _cache.GetAsync(key);
@@ -74,7 +70,7 @@ public class CachedProductService : IProductService
 
     public async Task<ProductResponse?> GetByIdAsync(int id)
     {
-        var key = ItemKey(id);
+        var key = ProductCacheKeys.ItemKey(id);
 
         try
         {
@@ -120,7 +116,7 @@ public class CachedProductService : IProductService
 
         if (updated is not null)
         {
-            await TryRemoveAsync(ItemKey(id));
+            await TryRemoveAsync(ProductCacheKeys.ItemKey(id));
             await InvalidateListsAsync();
         }
 
@@ -133,7 +129,7 @@ public class CachedProductService : IProductService
 
         if (deleted)
         {
-            await TryRemoveAsync(ItemKey(id));
+            await TryRemoveAsync(ProductCacheKeys.ItemKey(id));
             await InvalidateListsAsync();
         }
 
@@ -144,7 +140,7 @@ public class CachedProductService : IProductService
     {
         try
         {
-            await _cache.IncrementAsync(ListVersionKey);
+            await _cache.IncrementAsync(ProductCacheKeys.ListVersionKey);
         }
         catch (Exception ex)
         {
