@@ -1,8 +1,12 @@
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using ProductsApi.Auth;
 using ProductsApi.Caching;
 using ProductsApi.Data;
 using ProductsApi.Middleware;
 using ProductsApi.Outbox;
+using ProductsApi.Realtime;
 using ProductsApi.Services;
 using ProductsApi.Webhooks;
 using StackExchange.Redis;
@@ -47,6 +51,22 @@ builder.Services.AddSingleton<IExternalNotifier, LoggingExternalNotifier>();
 builder.Services.AddScoped<OutboxProcessor>();
 builder.Services.AddHostedService<OutboxWorker>();
 
+// Real-time notifications (Task 4): JWT authentication, a SignalR hub with private rooms, retries
+builder.Services.AddSignalR();
+builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection("Jwt"));
+builder.Services.Configure<DemoAuthOptions>(builder.Configuration.GetSection("Demo"));
+builder.Services.Configure<NotificationOptions>(builder.Configuration.GetSection("Notifications"));
+builder.Services.AddSingleton<JwtTokenService>();
+builder.Services.AddSingleton<DemoUserStore>();
+builder.Services.AddSingleton<PendingNotificationTracker>();
+builder.Services.AddSingleton<NotificationService>();
+builder.Services.AddHostedService<NotificationRetryWorker>();
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer();
+builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+    .Configure<IOptions<JwtOptions>>((options, jwt) => JwtBearerSetup.Configure(options, jwt.Value));
+builder.Services.AddAuthorization();
+
 var app = builder.Build();
 
 // Creates the tables on first start. Note: EnsureCreated does nothing if the database already
@@ -59,7 +79,14 @@ using (var scope = app.Services.CreateScope())
 
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseMiddleware<RateLimitingMiddleware>();
+app.UseAuthentication();
+app.UseAuthorization();
 app.MapControllers();
+app.MapHub<NotificationsHub>("/hubs/notifications", options =>
+{
+    // A connection is closed when its token expires, so a long-lived connection cannot outlive its authorization
+    options.CloseOnAuthenticationExpiration = true;
+});
 app.MapGet("/health", () => Results.Ok(new { status = "OK" }));
 
 app.Run();

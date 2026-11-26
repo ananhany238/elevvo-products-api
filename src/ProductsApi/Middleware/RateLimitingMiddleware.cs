@@ -26,8 +26,10 @@ public class RateLimitingMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        // Health checks must always work
-        if (context.Request.Path.StartsWithSegments("/health"))
+        // Health checks must always work, and SignalR connections are long-lived (and authenticated)
+        // so counting their protocol requests as API calls would be wrong
+        if (context.Request.Path.StartsWithSegments("/health")
+            || context.Request.Path.StartsWithSegments("/hubs"))
         {
             await _next(context);
             return;

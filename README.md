@@ -1,8 +1,8 @@
-# Products API: Docker, CI, Redis, and a Secure Webhook Receiver
+# Products API: Docker, CI, Redis, Webhooks and Real-Time Notifications
 
-A small REST API for products, built to practise the production side of backend work: a **multi-stage Docker build**, **automated tests**, a **CI pipeline that blocks failing code**, **Redis caching and distributed rate limiting**, and a **signed, idempotent webhook receiver**.
+A small REST API for products, built to practise the production side of backend work: a **multi-stage Docker build**, **automated tests**, a **CI pipeline that blocks failing code**, **Redis caching and distributed rate limiting**, a **signed, idempotent webhook receiver**, and **real-time notifications over private rooms**.
 
-Built for the Elevvo Backend Development internship (Level 3, Tasks 1, 2 and 3).
+Built for the Elevvo Backend Development internship (Level 3, Tasks 1 to 4).
 
 ## What this project demonstrates
 
@@ -15,6 +15,9 @@ Built for the Elevvo Backend Development internship (Level 3, Tasks 1, 2 and 3).
 - **Secure webhooks:** HMAC-SHA256 signatures over the raw body bytes, constant-time comparison, and replay protection with a timestamp window.
 - **Idempotent processing:** a UNIQUE index on the event id plus one database transaction, so retried or concurrent deliveries can never apply the same event twice.
 - **Transactional outbox (bonus):** a background worker delivers follow-up calls with retries, without duplicating events.
+- **Real-time notifications:** a SignalR hub that pushes order-status events to a user's private room, with JWT authentication.
+- **Identity-derived rooms:** the room comes from the verified token, never from anything the client sends, and a reconnect derives it again.
+- **Acknowledgements and bounded retries (bonus):** unacknowledged events are re-sent a limited number of times, and event ids stop duplicates reaching the screen.
 - **Docker Compose:** the API, PostgreSQL and Redis start together, and the API waits until both services are healthy.
 
 ## Tech stack
@@ -141,6 +144,53 @@ To watch the outbox retry, start the API with `$env:Outbox__SimulatedFailuresPer
 
 For `docker compose up --build`, put `WEBHOOK_SECRET=...` in a local `.env` file (it is git-ignored).
 
+## Real-time notifications (Task 4)
+
+Built with ASP.NET Core **SignalR**, the .NET equivalent of Socket.IO (connections, events and groups, which are SignalR's "rooms").
+
+| Piece | What it does |
+|---|---|
+| `POST /api/auth/login` | Checks the two local test users and returns a short-lived signed JWT |
+| `/hubs/notifications` | SignalR hub, `[Authorize]`: no valid token, no connection |
+| Room `user:{userId}` | The connection is added to it by the **server**, using the user id inside the verified token |
+| `POST /api/dev/simulate-status` | Stands in for the order system: publishes `{ eventId, orderId, status, timestamp }` to one user's room. Needs the server's `X-Api-Key`; disabled (404) if no key is set |
+| `Acknowledge(eventId)` | The only method a client can call. It only affects that user's own pending events |
+
+Full explanation of identity and room access: [docs/realtime-identity-and-rooms.md](docs/realtime-identity-and-rooms.md).
+
+### Event shape
+
+```json
+{ "eventId": "evt_0f8e...", "orderId": "ord_1001", "status": "shipped", "timestamp": "2026-11-24T12:00:00Z" }
+```
+
+### Reliability (bonus)
+
+- The server keeps each event as pending until the client acknowledges it.
+- Unacknowledged events are re-sent after 2s, 4s, 8s ... (capped at 30s), at most 5 attempts in total, then dropped with a log line.
+- When a user reconnects, their still-pending events are sent again to that user only.
+- Clients keep the event ids they have shown and ignore repeats, so a repeated delivery never shows twice.
+
+### Try it live
+
+```powershell
+# Window 1: environment + API
+. .\scripts\dev-env.ps1
+dotnet run --project src/ProductsApi
+
+# Window 2: Alice's client        Window 3: Bob's client
+. .\scripts\dev-env.ps1               . .\scripts\dev-env.ps1
+dotnet run --project tools/NotificationClient -- alice
+                                       dotnet run --project tools/NotificationClient -- bob
+
+# Window 4: simulate the order system
+. .\scripts\dev-env.ps1
+.\scripts\simulate-status.ps1 -User alice -Order ord_1001 -Status shipped   # only Alice's window prints it
+.\scripts\simulate-status.ps1 -User bob   -Order ord_2002 -Status delivered # only Bob's window prints it
+```
+
+The secrets are generated once into `.dev-env.json` (git-ignored). For `docker compose up --build`, put `JWT_KEY`, `DEMO_ALICE_PASSWORD`, `DEMO_BOB_PASSWORD` and `SIMULATION_KEY` in a local `.env` file.
+
 ## Tests
 
 ```powershell
@@ -152,6 +202,8 @@ dotnet test
 | Unit | Controller (fake service), service (in-memory database), exception middleware, cache decorator (hit, miss, TTL, invalidation, cache down), rate limiter (limit, 429, separate clients, fail open) |
 | Integration | Every endpoint over real HTTP, cache invalidation end to end, and the 429 response |
 | Webhook unit | Signature scheme (tampering, wrong secret, malformed headers, tolerance edges), schema validation, outbox retries and give-up |
+| Real-time unit | Room derivation from claims (suspicious ids rejected), pending-event tracker |
+| Real-time integration | Each user receives only their own events, forged or missing or expired tokens are refused, client-supplied ids and non-existent join methods are useless, disconnect and reconnect re-derive the room, acknowledgements, bounded retries, duplicate protection, simulation endpoint security |
 | Webhook integration | Valid, invalid-signature, stale, malformed, repeated and **concurrent** deliveries, over real HTTP and real SQL transactions |
 
 Tests use a throw-away SQLite database (a real relational engine, so unique indexes and transactions behave like production) and an in-memory cache, so they need no external services in CI.
@@ -175,9 +227,12 @@ src/ProductsApi/
   Middleware/     exception handling and rate limiting
   Webhooks/       signature verification, validation, idempotent processor
   Outbox/         outbox processor, background worker, simulated external system
+  Auth/           JWT issuing and validation, the two demo users
+  Realtime/       SignalR hub, rooms, notification service, retry worker
   Data/ Entities/ Dtos/
 tests/ProductsApi.Tests/  unit and integration tests, with in-memory fakes
-scripts/                  send-webhook.ps1 (signed webhook sender)
+scripts/                  dev-env.ps1, send-webhook.ps1, simulate-status.ps1
+tools/NotificationClient/ small live client for the real-time demo
 docs/                     idempotency explanation
 db/schema/                reference SQL for the webhook tables
 .github/workflows/        CI pipeline
@@ -198,6 +253,10 @@ docker-compose.yml        API + PostgreSQL + Redis with health checks
 - **Authenticate before parsing.** Nothing in the body is trusted until the signature is verified over the raw bytes.
 - **422 does not record the event.** If an event cannot be applied, the transaction is rolled back, so the sender can fix the cause and retry the same id.
 - **Webhook changes invalidate the cache.** The webhook bypasses the caching decorator, so it clears the affected keys itself after the commit.
+- **No "join room" method at all.** Safer than validating a requested room: there is nothing for a client to forge.
+- **Rooms are per connection.** A reconnect is a new connection, so authorization is re-checked instead of inherited.
+- **At-least-once delivery plus event ids.** Acknowledgements and retries can deliver an event twice; the client ignores ids it has shown.
+- **In-memory pending events.** Fine for one instance; scaling out needs a SignalR backplane and a shared store.
 - **SQLite for integration tests.** It is real SQL with real constraints and transactions, but not identical to PostgreSQL; running tests against a PostgreSQL container is a possible improvement.
 - **`EnsureCreated` at startup instead of migrations.** Simple for this project, but it does nothing on a database that already has tables, so after changing the model the dev database must be reset. Real deployments should use EF Core migrations.
 - **Passwords in `docker-compose.yml` are for local development only.**
