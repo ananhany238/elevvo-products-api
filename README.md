@@ -1,8 +1,8 @@
-# Products API: Docker, CI, Redis, Webhooks and Real-Time Notifications
+# Products API: Docker, CI, Redis, Webhooks, Real-Time Notifications and Backup Recovery
 
-A small REST API for products, built to practise the production side of backend work: a **multi-stage Docker build**, **automated tests**, a **CI pipeline that blocks failing code**, **Redis caching and distributed rate limiting**, a **signed, idempotent webhook receiver**, and **real-time notifications over private rooms**.
+A small REST API for products, built to practise the production side of backend work: a **multi-stage Docker build**, **automated tests**, a **CI pipeline that blocks failing code**, **Redis caching and distributed rate limiting**, a **signed, idempotent webhook receiver**, **real-time notifications over private rooms**, and a **tested PostgreSQL backup and recovery process**.
 
-Built for the Elevvo Backend Development internship (Level 3, Tasks 1 to 4).
+Built for the Elevvo Backend Development internship (Level 3, Tasks 1 to 5).
 
 ## What this project demonstrates
 
@@ -18,6 +18,7 @@ Built for the Elevvo Backend Development internship (Level 3, Tasks 1 to 4).
 - **Real-time notifications:** a SignalR hub that pushes order-status events to a user's private room, with JWT authentication.
 - **Identity-derived rooms:** the room comes from the verified token, never from anything the client sends, and a reconnect derives it again.
 - **Acknowledgements and bounded retries (bonus):** unacknowledged events are re-sent a limited number of times, and event ids stop duplicates reaching the screen.
+- **Backup and recovery (Task 5):** `pg_dump -Fc` backups, `pg_restore` into a separate database, automated validation, measured RTO, estimated RPO, retention, and a recovery runbook.
 - **Docker Compose:** the API, PostgreSQL and Redis start together, and the API waits until both services are healthy.
 
 ## Tech stack
@@ -191,6 +192,28 @@ dotnet run --project tools/NotificationClient -- alice
 
 The secrets are generated once into `.dev-env.json` (git-ignored). For `docker compose up --build`, put `JWT_KEY`, `DEMO_ALICE_PASSWORD`, `DEMO_BOB_PASSWORD` and `SIMULATION_KEY` in a local `.env` file.
 
+## Backup and recovery (Task 5)
+
+PowerShell scripts in `scripts/backup/` (settings come from the `PGUSER`, `PGPASSWORD` and `PGDATABASE` environment variables; credentials and backups are never committed):
+
+| Script | What it does |
+|---|---|
+| `Backup-Database.ps1` | `pg_dump -Fc` backup, checks the exit code, the file size and `pg_restore --list`, writes a manifest (row counts, content checksums, sample records), logs UTC timestamps, applies the retention policy (newest N kept) |
+| `Restore-Database.ps1` | `pg_restore` into a **separate** `<db>_restore_test` database, then validates it against the manifest and runs smoke queries |
+| `Invoke-RecoveryDrill.ps1` | Full drill on disposable sample data: backup, writes after the backup, simulated data loss, restore, validation, negative control, **RTO and RPO**, Markdown report |
+| `Test-RestoreInContainer.ps1` | Bonus: restores into a brand-new disposable container and **fails the script** if validation does not pass |
+
+Safety rules built into the scripts: only databases named `*_restore_test` or `*_drill` can ever be dropped or overwritten, and every step checks exit codes and stops with a non-zero exit code on failure.
+
+```powershell
+. .\scripts\backup\env.example.ps1               # dev values for the throw-away database
+.\scripts\backup\Backup-Database.ps1 -Keep 5
+.\scripts\backup\Restore-Database.ps1
+.\scripts\backup\Invoke-RecoveryDrill.ps1 -AlsoInContainer
+```
+
+The recovery procedure, how RTO and RPO are measured, and the limits compared with production disaster recovery are in [docs/recovery-runbook.md](docs/recovery-runbook.md). Drill output is in `docs/drill-output/`.
+
 ## Tests
 
 ```powershell
@@ -232,8 +255,10 @@ src/ProductsApi/
   Data/ Entities/ Dtos/
 tests/ProductsApi.Tests/  unit and integration tests, with in-memory fakes
 scripts/                  dev-env.ps1, send-webhook.ps1, simulate-status.ps1
+scripts/backup/           backup, restore, recovery drill and container restore test
+backups/                  backup files (git-ignored, never committed)
 tools/NotificationClient/ small live client for the real-time demo
-docs/                     idempotency explanation
+docs/                     idempotency, real-time identity, recovery runbook, drill output
 db/schema/                reference SQL for the webhook tables
 .github/workflows/        CI pipeline
 Dockerfile                multi-stage build

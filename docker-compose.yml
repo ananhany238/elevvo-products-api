@@ -35,6 +35,8 @@ services:
       - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # Backups are written here (git-ignored). Used by scripts/backup/*.ps1
+      - ./backups:/backups
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d productsdb"]
       interval: 5s

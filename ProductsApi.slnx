@@ -5,4 +5,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/ProductsApi.Tests/ProductsApi.Tests.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/NotificationClient/NotificationClient.csproj" />
+  </Folder>
 </Solution>
