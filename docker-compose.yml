@@ -8,6 +8,11 @@ services:
       Redis__ConnectionString: "redis:6379"
       # Set WEBHOOK_SECRET in a local .env file (never commit it). Empty = webhooks answer 503.
       Webhook__Secret: "${WEBHOOK_SECRET:-}"
+      # Real-time notifications (Task 4). Put the values in a local .env file (never commit it).
+      Jwt__Key: "${JWT_KEY:-}"
+      Demo__Users__alice: "${DEMO_ALICE_PASSWORD:-}"
+      Demo__Users__bob: "${DEMO_BOB_PASSWORD:-}"
+      Notifications__SimulationKey: "${SIMULATION_KEY:-}"
     depends_on:
       postgres:
         condition: service_healthy

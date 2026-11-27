@@ -5,9 +5,11 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using ProductsApi.Auth;
 using ProductsApi.Caching;
 using ProductsApi.Data;
 using ProductsApi.Outbox;
+using ProductsApi.Realtime;
 using ProductsApi.Webhooks;
 
 namespace ProductsApi.Tests;
@@ -16,11 +18,15 @@ namespace ProductsApi.Tests;
 //  - a throw-away SQLite database file instead of PostgreSQL (a real relational engine, so unique
 //    indexes, transactions and concurrent writers behave like in production)
 //  - an in-memory cache instead of Redis
-//  - a known webhook signing secret
+//  - a known webhook signing secret, JWT key, two demo users and a simulation key
 //  - no background outbox worker (tests run the outbox processor themselves)
 public class ProductsApiFactory : WebApplicationFactory<Program>
 {
     public const string WebhookSecret = "test-webhook-secret-0123456789abcdef";
+    public const string JwtKey = "test-jwt-signing-key-0123456789-abcdefghij";
+    public const string AlicePassword = "alice-test-password-1";
+    public const string BobPassword = "bob-test-password-2";
+    public const string SimulationKey = "test-simulation-key-abcdef";
 
     private readonly string _databasePath =
         Path.Combine(Path.GetTempPath(), $"products-tests-{Guid.NewGuid():N}.db");
@@ -53,10 +59,11 @@ public class ProductsApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<ICacheStore>();
             services.AddSingleton<ICacheStore>(Cache);
 
-            // No background polling during tests
+            // No background polling during tests (tests run the processors themselves)
             var workers = services
                 .Where(d => d.ServiceType == typeof(IHostedService)
-                            && d.ImplementationType == typeof(OutboxWorker))
+                            && (d.ImplementationType == typeof(OutboxWorker)
+                                || d.ImplementationType == typeof(NotificationRetryWorker)))
                 .ToList();
             foreach (var worker in workers)
             {
@@ -64,6 +71,18 @@ public class ProductsApiFactory : WebApplicationFactory<Program>
             }
 
             services.Configure<WebhookOptions>(options => options.Secret = WebhookSecret);
+
+            services.Configure<JwtOptions>(options => options.Key = JwtKey);
+            services.Configure<DemoAuthOptions>(options =>
+            {
+                options.Users["alice"] = AlicePassword;
+                options.Users["bob"] = BobPassword;
+            });
+            services.Configure<NotificationOptions>(options =>
+            {
+                options.SimulationKey = SimulationKey;
+                options.RetryBaseDelayMs = 100;
+            });
         });
     }
 
