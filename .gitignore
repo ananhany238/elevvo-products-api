@@ -484,3 +484,5 @@ $RECYCLE.BIN/
 .env
 . d e v - e n v . j s o n  
  
+backups/
+scripts/backup/env.local.ps1
